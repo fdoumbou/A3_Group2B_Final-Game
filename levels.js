@@ -162,6 +162,14 @@ const LEVELS = [
       { speaker: "Alex", text: "Okay. The store it is. I can do this." },
     ],
 
+    // ★ Optional collectible stars (3 per level).
+    // Some are placed near / inside noise zones on purpose — harder but more rewarding.
+    stars: [
+      { tx: 3,  ty: 3,  inNoise: false }, // ★1 — Safe: bedroom corner
+      { tx: 9,  ty: 3,  inNoise: true  }, // ★2 — Medium: near TV noise source
+      { tx: 17, ty: 9,  inNoise: true  }, // ★3 — Hard: right next to the fridge noise
+    ],
+
     levelHint: "Check the fridge in the kitchen, then head to the front door.",
   },
 
@@ -216,6 +224,13 @@ const LEVELS = [
       { tx: 15, ty: 6, type: 0, facing: 'right', patrol: null },
     ],
 
+    // ★ Optional collectible stars
+    stars: [
+      { tx: 5,  ty: 4,  inNoise: false }, // ★1 — Safe: left sidewalk
+      { tx: 10, ty: 5,  inNoise: true  }, // ★2 — Medium: on the road in traffic
+      { tx: 16, ty: 6,  inNoise: true  }, // ★3 — Hard: right inside crowd noise zone
+    ],
+
     levelHint: "Cross the street and reach the grocery store on the right.",
   },
 
@@ -263,6 +278,13 @@ const LEVELS = [
     npcs: [
       { tx: 6, ty: 4, type: 2, facing: 'down', patrol: [{tx:6,ty:4},{tx:6,ty:7},{tx:9,ty:7},{tx:9,ty:4}] },
       { tx: 12, ty: 10, type: 2, facing: 'right', patrol: null },
+    ],
+
+    // ★ Optional collectible stars
+    stars: [
+      { tx: 4,  ty: 10, inNoise: false }, // ★1 — Safe: on the main path
+      { tx: 7,  ty: 5,  inNoise: true  }, // ★2 — Medium: near kids playing zone
+      { tx: 15, ty: 7,  inNoise: true  }, // ★3 — Hard: in the dog's patrol territory
     ],
 
     levelHint: "Navigate the park and find your way home. Watch out for the dog.",

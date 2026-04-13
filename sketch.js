@@ -21,6 +21,18 @@ let exitUnlocked        = false;
 // ─── NPCs (runtime) ─────────────────────────────────────────────────────────
 let npcInstances = [];
 
+// ─── Stars (runtime) ─────────────────────────────────────────────────────────
+let starInstances   = [];   // { wx, wy, inNoise, collected }
+let starsCollected  = 0;    // stars collected this level
+const TOTAL_STARS   = 3;    // fixed per level
+
+// Per-level star scores, accumulated across the whole run
+// e.g. levelStarScores[0] = stars earned in level 1
+let levelStarScores = [];
+
+// Star collect particles for pop animation
+let starParticles = []; // { x, y, vx, vy, life, maxLife, col }
+
 // ─── Overload restart flash ──────────────────────────────────────────────────
 let overloadFlashAlpha = 0;
 
@@ -85,6 +97,7 @@ function draw() {
   tileMap.draw(CANVAS_W, CANVAS_H);
   ui.drawQuietZones(levelData.quietZones, tileMap);
   ui.drawNoiseSources(levelData.noiseSources, tileMap, imgNoiseIcons);
+  ui.drawStars(starInstances, tileMap);
   ui.drawCheckpoints(levelData.checkpoints, activeCheckpointIdx, tileMap);
   ui.drawExit(levelData.exit, tileMap, exitUnlocked);
   ui.drawFocusPath(player, levelData.exit, levelData.checkpoints, activeCheckpointIdx, tileMap);
@@ -98,9 +111,13 @@ function draw() {
   overloadFX.drawDistortion(player.sensory / player.sensoryMax);
   overloadFX.drawDistortion(player.sensory / player.sensoryMax);
 
+  // Star collect particles (screen-space, above vignette)
+  updateAndDrawParticles();
+
   // HUD
   ui.drawLevelLabel(levelData.name, CANVAS_W);
   ui.drawSensoryBar(player.sensory, player.sensoryMax, CANVAS_W);
+  ui.drawStarHUD(starsCollected, TOTAL_STARS, CANVAS_W);
 
   // Dialogue
   dialogue.update();
@@ -138,7 +155,22 @@ function draw() {
     player.reset(levelData.playerStart.tx, levelData.playerStart.ty);
     activeCheckpointIdx = 0;
     exitUnlocked        = false;
+    // Reset stars for this level
+    starsCollected = 0;
+    for (const s of starInstances) s.collected = false;
     return;
+  }
+
+  // ── Check star collection ─────────────────────────────────────────────
+  for (const s of starInstances) {
+    if (s.collected) continue;
+    if (dist(player.wx, player.wy, s.wx, s.wy) < TILE_PX * 0.9) {
+      s.collected = true;
+      starsCollected++;
+      // Spawn collect particles at screen position
+      const sc = tileMap.worldToScreen(s.wx, s.wy);
+      spawnStarParticles(sc.x, sc.y);
+    }
   }
 
   // Check checkpoint
@@ -162,6 +194,8 @@ function draw() {
     const ex  = levelData.exit;
     const exc = tileMap.tileCentre(ex.tx, ex.ty);
     if (dist(player.wx, player.wy, exc.x, exc.y) < TILE_PX * 1.2) {
+      // Bank this level's star score before showing dialogue
+      levelStarScores[levelIndex] = starsCollected;
       state = STATE.DIALOG;
       dialogue.start(levelData.exitDialog, () => {
         state = STATE.WIN;
@@ -177,12 +211,19 @@ function drawMenu() {
 
 function drawTransition() {
   transitionTimer++;
-  ui.drawTransition(levelData, CANVAS_W, CANVAS_H, transitionTimer, TRANSITION_DURATION);
+  // Show the previous level's score on this transition screen (if any)
+  const prevScore = levelIndex > 0 && levelStarScores[levelIndex - 1] !== undefined
+    ? levelStarScores[levelIndex - 1] : -1;
+  ui.drawTransition(levelData, CANVAS_W, CANVAS_H, transitionTimer, TRANSITION_DURATION,
+                    prevScore, TOTAL_STARS);
 }
 
 function drawWin() {
   const isLast = levelIndex >= LEVELS.length - 1;
-  ui.drawWin(levelData, CANVAS_W, CANVAS_H, isLast);
+  const totalAcrossRun = levelStarScores.reduce((a, b) => a + b, 0);
+  const maxAcrossRun   = LEVELS.length * TOTAL_STARS;
+  ui.drawWin(levelData, CANVAS_W, CANVAS_H, isLast, starsCollected, TOTAL_STARS,
+             levelStarScores, maxAcrossRun, totalAcrossRun);
 }
 
 // ─── Level Loading ───────────────────────────────────────────────────────────
@@ -195,6 +236,15 @@ function loadLevel(idx) {
   tileMap.setMap(levelData.map);
   player.reset(levelData.playerStart.tx, levelData.playerStart.ty);
   tileMap.updateCamera(player.wx, player.wy, CANVAS_W, CANVAS_H);
+
+  // Init star instances from level definition
+  starsCollected = 0;
+  starInstances  = (levelData.stars || []).map(s => ({
+    wx:        s.tx * TILE_PX + TILE_PX / 2,
+    wy:        s.ty * TILE_PX + TILE_PX / 2,
+    inNoise:   s.inNoise || false,
+    collected: false,
+  }));
 
   // Init NPC runtime instances
   npcInstances = [];
@@ -248,8 +298,8 @@ function keyPressed() {
 
   if (keyCode === ENTER) {
     if (state === STATE.MENU) {
+      levelStarScores = [];   // fresh run — clear any previous scores
       loadLevel(0);
-      // Show intro dialogue after transition
       return;
     }
     if (state === STATE.TRANS) {
@@ -267,10 +317,11 @@ function keyPressed() {
 
   if (key === 'r' || key === 'R') {
     if (state === STATE.WIN && levelIndex >= LEVELS.length - 1) {
-      // Restart from beginning
+      // Restart from beginning — clear cumulative scores
+      levelStarScores = [];
       loadLevel(0);
     } else if (state === STATE.PLAY || state === STATE.DIALOG) {
-      // Quick restart current level
+      // Quick restart current level — don't wipe scores of previous levels
       loadLevel(levelIndex);
     }
   }
@@ -285,6 +336,57 @@ function startPlayWithIntro() {
   if (!levelData.intro || levelData.intro.length === 0) {
     state = STATE.PLAY;
   }
+}
+
+// ─── Star Particle System ────────────────────────────────────────────────────
+function spawnStarParticles(sx, sy) {
+  const COLS = [
+    [255, 215,   0],   // gold
+    [255, 255, 140],   // pale yellow
+    [255, 180,  40],   // amber
+    [255, 255, 255],   // white flash
+  ];
+  for (let i = 0; i < 18; i++) {
+    const angle  = random(TWO_PI);
+    const speed  = random(1.5, 5.0);
+    const col    = random(COLS);
+    starParticles.push({
+      x: sx, y: sy,
+      vx: cos(angle) * speed,
+      vy: sin(angle) * speed - random(1, 3), // slight upward bias
+      life: 1.0,
+      decay: random(0.03, 0.06),
+      size: random(3, 8),
+      col,
+      isStar: i < 6,   // some particles are mini ★ glyphs
+    });
+  }
+}
+
+function updateAndDrawParticles() {
+  if (starParticles.length === 0) return;
+  push();
+  noStroke();
+  for (let i = starParticles.length - 1; i >= 0; i--) {
+    const p = starParticles[i];
+    p.x  += p.vx;
+    p.y  += p.vy;
+    p.vy += 0.18;   // gravity
+    p.vx *= 0.96;   // drag
+    p.life -= p.decay;
+    if (p.life <= 0) { starParticles.splice(i, 1); continue; }
+
+    const alpha = p.life * 255;
+    fill(p.col[0], p.col[1], p.col[2], alpha);
+    if (p.isStar) {
+      textSize(p.size * 2);
+      textAlign(CENTER, CENTER);
+      text('★', p.x, p.y);
+    } else {
+      ellipse(p.x, p.y, p.size * p.life, p.size * p.life);
+    }
+  }
+  pop();
 }
 
 // ─── Auto-advance transition ──────────────────────────────────────────────────
