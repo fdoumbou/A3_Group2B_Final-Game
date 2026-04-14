@@ -83,7 +83,7 @@ class GameUI {
     text(name, 18, 18);
     fill(160, 180, 220, 180);
     textSize(10);
-    text("SHIFT = Focus Mode", 18, 36);
+    text("SHIFT = Focus  |  M = Mute", 18, 36);
     pop();
   }
 

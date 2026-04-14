@@ -36,6 +36,9 @@ let starParticles = []; // { x, y, vx, vy, life, maxLife, col }
 // ─── Overload restart flash ──────────────────────────────────────────────────
 let overloadFlashAlpha = 0;
 
+// Track quiet zone occupancy to fire sound only on entry edge
+let _wasInQuietZone = false;
+
 // ─── Transition timer ────────────────────────────────────────────────────────
 let transitionTimer = 0;
 const TRANSITION_DURATION = 180; // frames before auto-skip allowed
@@ -149,13 +152,21 @@ function draw() {
   );
   overloadFX.update(player.sensory, player.sensoryMax);
 
+  // Quiet zone entry sound (fire once on edge, not every frame)
+  const inQZ = levelData.quietZones.some(q =>
+    player.wx > q.tx * TILE_PX && player.wx < (q.tx + q.tw) * TILE_PX &&
+    player.wy > q.ty * TILE_PX && player.wy < (q.ty + q.th) * TILE_PX
+  );
+  if (inQZ && !_wasInQuietZone) SFX.enterQuietZone();
+  _wasInQuietZone = inQZ;
+
   // Check overload
   if (player.overloaded) {
+    SFX.overload();
     overloadFlashAlpha = 255;
     player.reset(levelData.playerStart.tx, levelData.playerStart.ty);
     activeCheckpointIdx = 0;
     exitUnlocked        = false;
-    // Reset stars for this level
     starsCollected = 0;
     for (const s of starInstances) s.collected = false;
     return;
@@ -167,7 +178,7 @@ function draw() {
     if (dist(player.wx, player.wy, s.wx, s.wy) < TILE_PX * 0.9) {
       s.collected = true;
       starsCollected++;
-      // Spawn collect particles at screen position
+      SFX.starCollect();
       const sc = tileMap.worldToScreen(s.wx, s.wy);
       spawnStarParticles(sc.x, sc.y);
     }
@@ -178,6 +189,7 @@ function draw() {
     const cp = levelData.checkpoints[activeCheckpointIdx];
     const nc = tileMap.tileCentre(cp.tx, cp.ty);
     if (dist(player.wx, player.wy, nc.x, nc.y) < TILE_PX * 1.0) {
+      SFX.checkpoint();
       state = STATE.DIALOG;
       dialogue.start(cp.dialog, () => {
         activeCheckpointIdx++;
@@ -194,10 +206,11 @@ function draw() {
     const ex  = levelData.exit;
     const exc = tileMap.tileCentre(ex.tx, ex.ty);
     if (dist(player.wx, player.wy, exc.x, exc.y) < TILE_PX * 1.2) {
-      // Bank this level's star score before showing dialogue
       levelStarScores[levelIndex] = starsCollected;
+      SFX.exitReached();
       state = STATE.DIALOG;
       dialogue.start(levelData.exitDialog, () => {
+        SFX.levelComplete();
         state = STATE.WIN;
       }, imgPortrait);
     }
@@ -315,6 +328,12 @@ function keyPressed() {
     }
   }
 
+  if (key === 'm' || key === 'M') {
+    const nowMuted = SFX.toggleMute();
+    // Brief visual feedback handled by UI mute indicator drawn in drawSensoryBar area
+    return;
+  }
+
   if (key === 'r' || key === 'R') {
     if (state === STATE.WIN && levelIndex >= LEVELS.length - 1) {
       // Restart from beginning — clear cumulative scores
@@ -328,11 +347,11 @@ function keyPressed() {
 }
 
 function startPlayWithIntro() {
+  SFX.levelStart();
   state = STATE.DIALOG;
   dialogue.start(levelData.intro, () => {
     state = STATE.PLAY;
   }, imgPortrait);
-  // If no intro, just play
   if (!levelData.intro || levelData.intro.length === 0) {
     state = STATE.PLAY;
   }
